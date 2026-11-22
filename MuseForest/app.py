@@ -16,6 +16,7 @@ Run:
     streamlit run app.py
 """
 
+import io
 import json
 import random
 from datetime import date, datetime, timedelta
@@ -900,6 +901,69 @@ def show_image(filename: str, label: str, width: int | None = None, full_width: 
     )
 
 
+@st.cache_data(show_spinner=False)
+def _stage_image_bytes(bg_path: str, char_path: str, bg_mtime: float, char_mtime: float) -> bytes | None:
+    """Composite the stage like the original space: the background fills the
+    stage and Muse's portrait card (rounded corners, white frame, soft
+    shadow) sits at the bottom center on top of it. Returns PNG bytes, or
+    None when compositing is unavailable (caller falls back to stacking)."""
+    try:
+        from PIL import Image, ImageDraw, ImageFilter
+    except Exception:
+        return None
+    try:
+        stage = Image.open(bg_path).convert("RGB")
+        char = Image.open(char_path).convert("RGB")
+    except Exception:
+        return None
+
+    W, H = stage.size
+    # Card geometry mirrors the space's stage (card 44:60, height ~52% of
+    # the stage, bottom margin ~11.5% of the stage height).
+    card_h = int(H * 0.52)
+    card_w = int(card_h * 44 / 60)
+    ratio = card_w / card_h
+    sw, sh = char.size
+    if sw / sh > ratio:  # too wide: crop the sides, keep the full height
+        cw = int(sh * ratio)
+        x0 = (sw - cw) // 2
+        box = (x0, 0, x0 + cw, sh)
+    else:  # too tall: crop from the top (object-top in the space)
+        ch = int(sw / ratio)
+        box = (0, 0, sw, ch)
+    card = char.crop(box).resize((card_w, card_h), Image.LANCZOS)
+
+    radius = int(card_h * 0.15)
+    border = max(6, int(H * 0.008))
+    mask = Image.new("L", (card_w, card_h), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, card_w - 1, card_h - 1], radius=radius, fill=255)
+
+    framed_w, framed_h = card_w + border * 2, card_h + border * 2
+    framed = Image.new("RGBA", (framed_w, framed_h), (0, 0, 0, 0))
+    ImageDraw.Draw(framed).rounded_rectangle(
+        [0, 0, framed_w - 1, framed_h - 1], radius=radius + border, fill=(255, 255, 255, 255)
+    )
+    framed.paste(card, (border, border), mask)
+
+    x = (W - framed_w) // 2
+    y = H - int(H * 0.115) - framed_h
+
+    shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(shadow).rounded_rectangle(
+        [x, y + int(H * 0.012), x + framed_w, y + int(H * 0.012) + framed_h],
+        radius=radius + border,
+        fill=(0, 0, 0, 110),
+    )
+    shadow = shadow.filter(ImageFilter.GaussianBlur(int(H * 0.008)))
+
+    out = stage.convert("RGBA")
+    out.alpha_composite(shadow)
+    out.alpha_composite(framed, (x, y))
+    buf = io.BytesIO()
+    out.convert("RGB").save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def paged_buttons(total: int, page_size: int, state_key: str) -> int:
     """Renders 「1〜10」 style page buttons when more than one page; returns page."""
     pages = max(1, (total + page_size - 1) // page_size)
@@ -1027,7 +1091,6 @@ def room_tab(state: dict, today: date) -> None:
     # --- Stage -------------------------------------------------------------
     theme_name = THEME_NAME[state["theme"]]
     loc_name = LOCATION_NAME[loc]
-    show_image(bg_filename(state["theme"], loc), f"{theme_name}の{loc_name}", full_width=True)
 
     effective_outfit = state["current_outfit"]
     if loc == "bedroom":
@@ -1035,20 +1098,32 @@ def room_tab(state: dict, today: date) -> None:
     elif loc == "bath":
         effective_outfit = "bath"
 
-    scol, tcol = st.columns([1, 2])
-    with scol:
-        show_image(outfit_filename(effective_outfit), f"ミューズ（{OUTFIT_NAME[effective_outfit]}）", width=260)
-        st.caption(f"ミューズ ・ {OUTFIT_NAME[effective_outfit]}")
-    with tcol:
-        st.markdown(f"**{loc_name}** のミューズ")
-        st.info(state["last_line"] or LOCATION_GREETING[loc])
-        placed_here = [ITEM_BY_ID[i] for i in state["placed_items"] if ITEM_BY_ID[i][3] == loc]
-        if placed_here:
-            chips = "　".join(
-                f"<span style='background:{it[4]};border-radius:50%;display:inline-block;width:10px;height:10px;'></span> {it[1]}"
-                for it in placed_here
-            )
-            st.markdown(f"飾ってあるもの： {chips}", unsafe_allow_html=True)
+    bg_file = bg_filename(state["theme"], loc)
+    char_file = outfit_filename(effective_outfit)
+    bg_path = ASSETS_DIR / bg_file
+    char_path = ASSETS_DIR / char_file
+    stage_bytes = None
+    if bg_path.exists() and char_path.exists():
+        stage_bytes = _stage_image_bytes(
+            str(bg_path), str(char_path), bg_path.stat().st_mtime, char_path.stat().st_mtime
+        )
+    if stage_bytes is not None:
+        st.image(stage_bytes, use_container_width=True)
+    elif bg_path.exists():
+        show_image(bg_file, f"{theme_name}の{loc_name}", full_width=True)
+        show_image(char_file, f"ミューズ（{OUTFIT_NAME[effective_outfit]}）", width=260)
+    else:
+        show_image(bg_file, f"{theme_name}の{loc_name}", full_width=True)
+
+    st.caption(f"{theme_name} ・ {loc_name} ｜ ミューズ ・ {OUTFIT_NAME[effective_outfit]}")
+    st.info(state["last_line"] or LOCATION_GREETING[loc])
+    placed_here = [ITEM_BY_ID[i] for i in state["placed_items"] if ITEM_BY_ID[i][3] == loc]
+    if placed_here:
+        chips = "　".join(
+            f"<span style='background:{it[4]};border-radius:50%;display:inline-block;width:10px;height:10px;'></span> {it[1]}"
+            for it in placed_here
+        )
+        st.markdown(f"飾ってあるもの： {chips}", unsafe_allow_html=True)
 
     # --- Actions -----------------------------------------------------------
     acol1, acol2, acol3, acol4 = st.columns(4)
