@@ -1055,12 +1055,14 @@ def room_tab(state: dict, today: date) -> None:
     page_locs = LOCATIONS[page * 5:(page + 1) * 5]
     cols = st.columns(len(page_locs))
     for col, (lid, name, _g) in zip(cols, page_locs):
-        if col.button(name, key=f"loc_{lid}", type="primary" if lid == loc else "secondary", use_container_width=True):
-            if lid != loc:
-                state["current_location"] = lid
-                add_moment(state, "move", f"{name}へ移動した", lid)
-                save_state(state)
-            st.rerun()
+        with col:
+            show_image(bg_filename(state["theme"], lid), name, width=140)
+            if st.button(name, key=f"loc_{lid}", type="primary" if lid == loc else "secondary", use_container_width=True):
+                if lid != loc:
+                    state["current_location"] = lid
+                    add_moment(state, "move", f"{name}へ移動した", lid)
+                    save_state(state)
+                st.rerun()
 
     st.subheader("テーマ")
     tpage = paged_buttons(len(THEMES), 10, "theme_page")
