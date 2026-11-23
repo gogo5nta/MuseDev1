@@ -1194,14 +1194,16 @@ def room_tab(state: dict, today: date) -> None:
                 label = f"🔒 {oname}（{release_date.month}月{release_date.day}日）"
             elif is_new:
                 label = f"{oname}（今日の新作）"
-            if col.button(label, key=f"outfit_{oid}", disabled=not released, use_container_width=True):
-                state["current_outfit"] = oid
-                state["outfit_change_count"] += 1
-                gain_friendship(state, 1)
-                state["last_line"] = f"「{oname}」に着替えたよ。{outfit[2]}"
-                add_moment(state, "outfit", f"「{oname}」に着替えた", loc)
-                save_state(state)
-                st.rerun()
+            with col:
+                show_image(outfit_filename(oid), oname, width=140)
+                if st.button(label, key=f"outfit_{oid}", disabled=not released, use_container_width=True):
+                    state["current_outfit"] = oid
+                    state["outfit_change_count"] += 1
+                    gain_friendship(state, 1)
+                    state["last_line"] = f"「{oname}」に着替えたよ。{outfit[2]}"
+                    add_moment(state, "outfit", f"「{oname}」に着替えた", loc)
+                    save_state(state)
+                    st.rerun()
     current_outfit = next(o for o in OUTFITS if o[0] == state["current_outfit"])
     st.caption(f"いまのコーデ： {current_outfit[1]} — {current_outfit[2]}")
 
