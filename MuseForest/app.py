@@ -1081,12 +1081,14 @@ def room_tab(state: dict, today: date) -> None:
                 label = f"🔒 {tname}（なかよし度{req}で解放）"
             elif is_new:
                 label = f"{tname}（今日の新作）"
-            if col.button(label, key=f"theme_{tid}", disabled=not unlocked, use_container_width=True):
-                state["theme"] = tid
-                state["last_line"] = line
-                add_moment(state, "move", f"テーマを「{tname}」に変えた", loc)
-                save_state(state)
-                st.rerun()
+            with col:
+                show_image(bg_filename(tid, loc), tname, width=140)
+                if st.button(label, key=f"theme_{tid}", disabled=not unlocked, use_container_width=True):
+                    state["theme"] = tid
+                    state["last_line"] = line
+                    add_moment(state, "move", f"テーマを「{tname}」に変えた", loc)
+                    save_state(state)
+                    st.rerun()
 
     # --- Stage -------------------------------------------------------------
     theme_name = THEME_NAME[state["theme"]]
@@ -1283,7 +1285,7 @@ def friends_tab(state: dict, today: date) -> None:
         c1, c2, c3 = st.columns([1, 4, 1])
         with c1:
             if is_in:
-                show_image(villager_filename(v["id"]), f"{v['species']}の{v['name']}", width=90)
+                show_image(villager_filename(v["id"]), f"{v['species']}の{v['name']}", width=120)
             else:
                 st.markdown("### ？？？")
         with c2:
